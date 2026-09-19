@@ -312,3 +312,47 @@ async def consultar_cnpj(request: CNPJRequest, api_key_data: dict = Depends(get_
 @app.get("/health", tags=["Status"])
 async def health():
     return {"status": "ok", "timestamp": time.time(), "service": "KEEPIT Agent Protocol"}
+
+# OAuth exchange endpoint para Instagram
+@app.get("/oauth-exchange", tags=["Auth"])
+async def oauth_exchange(code: str):
+    """Troca código OAuth por token de acesso Instagram"""
+    import httpx
+    APP_ID = "276107559425496"
+    APP_SECRET = "85b38f98bc6a74e537abedce070f48e2"
+    REDIRECT_URI = "https://keepithub.com/oauth/callback"
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/v21.0/oauth/access_token",
+            params={
+                "client_id": APP_ID,
+                "redirect_uri": REDIRECT_URI,
+                "client_secret": APP_SECRET,
+                "code": code
+            }
+        )
+        data = resp.json()
+        
+        if "access_token" in data:
+            token = data["access_token"]
+            # Salvar token
+            import os
+            with open("/tmp/ig_new_token.txt", "w") as f:
+                f.write(token)
+            # Tentar fazer long-lived token
+            ll_resp = await client.get(
+                "https://graph.instagram.com/access_token",
+                params={
+                    "grant_type": "ig_exchange_token",
+                    "client_secret": APP_SECRET,
+                    "access_token": token
+                }
+            )
+            ll_data = ll_resp.json()
+            final_token = ll_data.get("access_token", token)
+            with open("/tmp/ig_new_token.txt", "w") as f:
+                f.write(final_token)
+            return {"success": True, "token_length": len(final_token), "expires_in_days": ll_data.get("expires_in", 0) // 86400}
+        
+        return {"success": False, "error": data.get("error", {})}

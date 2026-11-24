@@ -84,7 +84,7 @@ Every request is filtered by **NEVEN GUARDIAN** — an infrastructure-level secu
 # Test the API right now (no signup required for demo)
 curl -X POST https://keepithub.com/api/v1/skills/pix \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: keepit_free_demo_key" \
+  -H "X-API-Key: your_api_key" \
   -d '{
     "chave": "test@example.com",
     "valor": 10.00,
@@ -143,3 +143,10 @@ capabilities to be truly useful.
 MIT — free to use, modify, and distribute.
 
 Built with ❤️ in Brazil by the KEEPIT team.
+
+## Configuracao de segredos
+
+Todas as credenciais vem de variaveis de ambiente. Copie `.env.example` para `.env` (o `.env` esta no `.gitignore`) ou configure as variaveis no painel do servidor:
+
+- `META_APP_ID`, `META_APP_SECRET`: app Meta usado em `/oauth-exchange`. Sem elas o endpoint responde 503.
+- `KEEPIT_API_KEYS`: chaves de clientes no formato `chave:plano` separadas por virgula. Sem ela nenhuma chave e aceita.

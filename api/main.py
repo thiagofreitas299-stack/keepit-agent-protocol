@@ -38,11 +38,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API Keys válidas (em produção: banco de dados + Stripe)
-VALID_API_KEYS = {
-    "keepit_free_demo_key": {"plan": "free", "calls_limit": 100, "calls_used": 0},
-    "keepit_pro_demo_key": {"plan": "pro", "calls_limit": 10000, "calls_used": 0},
-}
+# API Keys validas (em producao: banco de dados + Stripe)
+# Lidas do ambiente: KEEPIT_API_KEYS="chave1:free,chave2:pro". Nunca no codigo.
+import os as _os
+_PLAN_LIMITS = {"free": 100, "pro": 10000}
+
+def _load_api_keys() -> Dict[str, Dict[str, Any]]:
+    keys: Dict[str, Dict[str, Any]] = {}
+    for item in _os.getenv("KEEPIT_API_KEYS", "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        key, _, plan = item.partition(":")
+        plan = plan.strip() or "free"
+        keys[key.strip()] = {"plan": plan, "calls_limit": _PLAN_LIMITS.get(plan, 100), "calls_used": 0}
+    if not keys:
+        logger.warning("KEEPIT_API_KEYS nao configurado: nenhuma API key valida")
+    return keys
+
+VALID_API_KEYS = _load_api_keys()
 
 # Rate limiting simples (em produção: Redis)
 rate_limit_store: Dict[str, list] = defaultdict(list)
@@ -314,17 +328,22 @@ async def health():
     return {"status": "ok", "timestamp": time.time(), "service": "KEEPIT Agent Protocol"}
 
 # OAuth exchange endpoint para Instagram
+# Credenciais lidas do ambiente (.env local ou variaveis do servidor). Nunca no codigo.
 @app.get("/oauth-exchange", tags=["Auth"])
 async def oauth_exchange(code: str):
-    """Troca código OAuth por token de acesso Instagram"""
-    import httpx
-    APP_ID = "276107559425496"
-    APP_SECRET = "85b38f98bc6a74e537abedce070f48e2"
-    REDIRECT_URI = "https://keepithub.com/oauth/callback"
-    
+    """Troca codigo OAuth por token de acesso Instagram"""
+    import os
+    APP_ID = os.getenv("META_APP_ID")
+    APP_SECRET = os.getenv("META_APP_SECRET")
+    REDIRECT_URI = os.getenv("META_REDIRECT_URI", "https://keepithub.com/oauth/callback")
+    TOKEN_PATH = os.getenv("META_TOKEN_PATH", "/tmp/ig_new_token.txt")
+    if not APP_ID or not APP_SECRET:
+        logger.error("oauth-exchange: META_APP_ID/META_APP_SECRET nao configurados")
+        raise HTTPException(status_code=503, detail="OAuth indisponivel: credenciais Meta nao configuradas no servidor")
+
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"https://graph.facebook.com/v21.0/oauth/access_token",
+            "https://graph.facebook.com/v21.0/oauth/access_token",
             params={
                 "client_id": APP_ID,
                 "redirect_uri": REDIRECT_URI,
@@ -333,13 +352,9 @@ async def oauth_exchange(code: str):
             }
         )
         data = resp.json()
-        
+
         if "access_token" in data:
             token = data["access_token"]
-            # Salvar token
-            import os
-            with open("/tmp/ig_new_token.txt", "w") as f:
-                f.write(token)
             # Tentar fazer long-lived token
             ll_resp = await client.get(
                 "https://graph.instagram.com/access_token",
@@ -351,8 +366,9 @@ async def oauth_exchange(code: str):
             )
             ll_data = ll_resp.json()
             final_token = ll_data.get("access_token", token)
-            with open("/tmp/ig_new_token.txt", "w") as f:
+            fd = os.open(TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 f.write(final_token)
             return {"success": True, "token_length": len(final_token), "expires_in_days": ll_data.get("expires_in", 0) // 86400}
-        
+
         return {"success": False, "error": data.get("error", {})}
